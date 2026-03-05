@@ -2,17 +2,17 @@ import { useState, useMemo, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { jobs } from "@/data/jobs";
+import { jobs, type Job } from "@/data/jobs";
 import { loadPreferences, computeMatchScore, scoreBadgeVariant } from "@/lib/preferences";
-import { Link } from "react-router-dom";
 import { toast } from "@/hooks/use-toast";
-import {
-  ExternalLink, Sparkles, Copy, Mail, MapPin, Briefcase, AlertCircle, Inbox,
-} from "lucide-react";
+import { ExternalLink, Sparkles, Copy, Mail, MapPin, Bookmark, BookmarkCheck } from "lucide-react";
+
+const DIGEST_PREFIX = "jobTrackerDigest_";
+const SAVED_KEY = "jnt_saved_jobs";
 
 const todayKey = () => {
   const d = new Date();
-  return `jobTrackerDigest_${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return `${DIGEST_PREFIX}${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 
 const formatDate = () =>
@@ -28,55 +28,119 @@ interface DigestEntry {
   applyUrl: string;
 }
 
+const getSaved = (): number[] => {
+  try {
+    return JSON.parse(localStorage.getItem(SAVED_KEY) || "[]") as number[];
+  } catch {
+    return [];
+  }
+};
+
+const toggleSave = (id: number): number[] => {
+  const current = getSaved();
+  const next = current.includes(id) ? current.filter(item => item !== id) : [...current, id];
+  localStorage.setItem(SAVED_KEY, JSON.stringify(next));
+  return next;
+};
+
+const createMockJobs = (): Job[] =>
+  Array.from({ length: 10 }, (_, index) => ({
+    id: 9000 + index,
+    title: `Software Engineer Intern ${index + 1}`,
+    company: ["NovaStack Labs", "ByteSprint", "CodeOrbit", "CloudNest"][index % 4],
+    location: ["Bangalore", "Hyderabad", "Pune", "Chennai"][index % 4],
+    mode: ["Remote", "Hybrid", "Onsite"][index % 3] as Job["mode"],
+    experience: ["Fresher", "0-1", "1-3"][index % 3] as Job["experience"],
+    skills: ["React", "TypeScript", "Node.js"],
+    source: ["LinkedIn", "Naukri", "Indeed"][index % 3] as Job["source"],
+    postedDaysAgo: index % 5,
+    salaryRange: "3–5 LPA",
+    applyUrl: `https://jobs.example.com/apply/${9000 + index}`,
+    description:
+      "Join a product-focused engineering team and ship real features from day one.\n\nWork closely with mentors on frontend and backend modules.\n\nStrong fundamentals in JavaScript and problem solving are preferred.",
+  }));
+
 const loadDigest = (): DigestEntry[] | null => {
   try {
     const raw = localStorage.getItem(todayKey());
-    return raw ? (JSON.parse(raw) as DigestEntry[]) : null;
-  } catch { return null; }
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as DigestEntry[];
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const buildDigest = (sourceJobs: Job[], prefs: ReturnType<typeof loadPreferences>) => {
+  const scored = sourceJobs.map(job => ({
+    job,
+    score: prefs ? computeMatchScore(job, prefs) : 0,
+  }));
+
+  const matches = prefs
+    ? scored
+        .filter(({ score }) => score >= prefs.minMatchScore)
+        .sort((a, b) => b.score - a.score || a.job.postedDaysAgo - b.job.postedDaysAgo)
+    : [];
+
+  const selected = [...matches];
+  const pickedIds = new Set(selected.map(({ job }) => job.id));
+  const recents = [...scored].sort((a, b) => a.job.postedDaysAgo - b.job.postedDaysAgo);
+
+  for (const item of recents) {
+    if (selected.length >= 10) break;
+    if (!pickedIds.has(item.job.id)) {
+      selected.push(item);
+      pickedIds.add(item.job.id);
+    }
+  }
+
+  return selected.slice(0, 10).map(({ job, score }) => ({
+    id: job.id,
+    title: job.title,
+    company: job.company,
+    location: job.location,
+    experience: job.experience,
+    matchScore: score,
+    applyUrl: job.applyUrl,
+  }));
 };
 
 const Digest = () => {
   const prefs = useMemo(() => loadPreferences(), []);
   const [digest, setDigest] = useState<DigestEntry[] | null>(() => loadDigest());
+  const [savedIds, setSavedIds] = useState<number[]>(() => getSaved());
 
   const generate = useCallback(() => {
-    if (!prefs) return;
     const existing = loadDigest();
-    if (existing) { setDigest(existing); return; }
+    if (existing) {
+      setDigest(existing);
+      toast({ description: "Loaded today's existing digest." });
+      return;
+    }
 
-    const scored = jobs
-      .map(j => ({ job: j, score: computeMatchScore(j, prefs) }))
-      .filter(({ score }) => score >= prefs.minMatchScore)
-      .sort((a, b) => b.score - a.score || a.job.postedDaysAgo - b.job.postedDaysAgo)
-      .slice(0, 10)
-      .map(({ job, score }) => ({
-        id: job.id,
-        title: job.title,
-        company: job.company,
-        location: job.location,
-        experience: job.experience,
-        matchScore: score,
-        applyUrl: job.applyUrl,
-      }));
+    const pool = jobs.length > 0 ? jobs : createMockJobs();
+    const nextDigest = buildDigest(pool, prefs);
 
-    localStorage.setItem(todayKey(), JSON.stringify(scored));
-    setDigest(scored);
+    localStorage.setItem(todayKey(), JSON.stringify(nextDigest));
+    setDigest(nextDigest);
     toast({ description: "Digest generated for today." });
   }, [prefs]);
 
   const digestText = useMemo(() => {
     if (!digest || digest.length === 0) return "";
     return [
-      `Top 10 Jobs For You — 9AM Digest`,
+      "Top 10 Jobs For You — 9AM Digest",
       formatDate(),
       "",
-      ...digest.map((d, i) =>
-        `${i + 1}. ${d.title} at ${d.company}\n   ${d.location} · ${d.experience} · ${d.matchScore}% match\n   Apply: ${d.applyUrl}`
+      ...digest.map(
+        (d, i) =>
+          `${i + 1}. ${d.title} at ${d.company}\n   ${d.location} · ${d.experience}${prefs ? ` · ${d.matchScore}% match` : ""}\n   Apply: ${d.applyUrl}`,
       ),
       "",
-      "Generated based on your preferences.",
+      "Generated based on your preferences and latest job feed.",
     ].join("\n");
-  }, [digest]);
+  }, [digest, prefs]);
 
   const copyDigest = useCallback(() => {
     navigator.clipboard.writeText(digestText);
@@ -89,33 +153,29 @@ const Digest = () => {
     window.open(`mailto:?subject=${subject}&body=${body}`, "_self");
   }, [digestText]);
 
-  /* ── No preferences ── */
-  if (!prefs) {
-    return (
-      <div className="flex-1 flex items-center justify-center p-6">
-        <Card className="max-w-md w-full text-center p-6">
-          <AlertCircle className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
-          <CardTitle className="mb-2">Preferences Required</CardTitle>
-          <CardDescription className="mb-4">Set preferences to generate a personalized digest.</CardDescription>
-          <Button asChild><Link to="/settings">Go to Settings</Link></Button>
-        </Card>
-      </div>
-    );
-  }
+  const handleSave = useCallback((id: number) => {
+    const next = toggleSave(id);
+    setSavedIds(next);
+    toast({ description: next.includes(id) ? "Job saved" : "Job removed from saved" });
+  }, []);
 
   return (
-    <div className="flex-1 p-4 md:p-8 max-w-2xl mx-auto w-full">
-      {/* Generate button */}
+    <div className="flex-1 p-4 md:p-8 max-w-3xl mx-auto w-full bg-muted/20 rounded-lg">
+      {!prefs && (
+        <p className="text-xs text-muted-foreground text-center mb-4">
+          Preferences not set — showing latest jobs now and upgrading matching once preferences are saved.
+        </p>
+      )}
+
       {!digest && (
         <div className="text-center mb-6">
           <Button size="lg" onClick={generate} className="gap-2">
-            <Sparkles className="h-4 w-4" /> Generate Today's 9AM Digest (Simulated)
+            <Sparkles className="h-4 w-4" /> Generate Today&apos;s 9AM Digest (Simulated)
           </Button>
           <p className="text-xs text-muted-foreground mt-2">Demo Mode: Daily 9AM trigger simulated manually.</p>
         </div>
       )}
 
-      {/* Digest card */}
       {digest && (
         <Card className="bg-card shadow-lg">
           <CardHeader className="text-center border-b pb-4">
@@ -124,52 +184,49 @@ const Digest = () => {
           </CardHeader>
 
           <CardContent className="pt-4 space-y-3">
-            {digest.length === 0 ? (
-              <div className="text-center py-8">
-                <Inbox className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
-                <p className="text-muted-foreground">No matching roles today. Check again tomorrow.</p>
-              </div>
-            ) : (
-              digest.map((d, i) => (
+            {digest.map((d, i) => {
+              const isSaved = savedIds.includes(d.id);
+              return (
                 <div key={d.id} className="flex items-start justify-between gap-3 border-b last:border-0 pb-3 last:pb-0">
-                  <div className="flex gap-3 min-w-0">
-                    <span className="text-sm font-medium text-muted-foreground pt-0.5">{i + 1}</span>
-                    <div className="min-w-0">
-                      <p className="font-serif font-semibold text-sm leading-tight truncate">{d.title}</p>
-                      <p className="text-xs text-foreground/80">{d.company}</p>
-                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground mt-0.5">
-                        <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{d.location}</span>
-                        <span className="flex items-center gap-1"><Briefcase className="h-3 w-3" />{d.experience}</span>
-                      </div>
-                    </div>
+                  <div className="min-w-0">
+                    <p className="font-serif font-semibold text-sm leading-tight">
+                      {i + 1}. {d.title}
+                    </p>
+                    <p className="text-xs text-foreground/80">{d.company}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+                      <MapPin className="h-3 w-3" /> {d.location}
+                    </p>
                   </div>
+
                   <div className="flex items-center gap-2 shrink-0">
-                    <Badge variant={scoreBadgeVariant(d.matchScore)}>{d.matchScore}%</Badge>
+                    {prefs && <Badge variant={scoreBadgeVariant(d.matchScore)}>{d.matchScore}%</Badge>}
                     <Button variant="ghost" size="sm" asChild>
-                      <a href={d.applyUrl} target="_blank" rel="noopener noreferrer">
-                        <ExternalLink className="h-3.5 w-3.5" />
+                      <a href={d.applyUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1">
+                        <ExternalLink className="h-3.5 w-3.5" /> Apply
                       </a>
+                    </Button>
+                    <Button variant={isSaved ? "default" : "secondary"} size="sm" onClick={() => handleSave(d.id)} className="gap-1">
+                      {isSaved ? <BookmarkCheck className="h-3.5 w-3.5" /> : <Bookmark className="h-3.5 w-3.5" />}
+                      {isSaved ? "Saved" : "Save"}
                     </Button>
                   </div>
                 </div>
-              ))
-            )}
+              );
+            })}
           </CardContent>
 
-          {digest.length > 0 && (
-            <CardFooter className="flex-col gap-3 border-t pt-4">
-              <p className="text-xs text-muted-foreground text-center">This digest was generated based on your preferences.</p>
-              <div className="flex gap-2">
-                <Button variant="secondary" size="sm" onClick={copyDigest} className="gap-1">
-                  <Copy className="h-3.5 w-3.5" /> Copy Digest
-                </Button>
-                <Button variant="secondary" size="sm" onClick={emailDigest} className="gap-1">
-                  <Mail className="h-3.5 w-3.5" /> Create Email Draft
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">Demo Mode: Daily 9AM trigger simulated manually.</p>
-            </CardFooter>
-          )}
+          <CardFooter className="flex-col gap-3 border-t pt-4">
+            <p className="text-xs text-muted-foreground text-center">This digest was generated based on your preferences.</p>
+            <div className="flex gap-2">
+              <Button variant="secondary" size="sm" onClick={copyDigest} className="gap-1">
+                <Copy className="h-3.5 w-3.5" /> Copy Digest
+              </Button>
+              <Button variant="secondary" size="sm" onClick={emailDigest} className="gap-1">
+                <Mail className="h-3.5 w-3.5" /> Create Email Draft
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">Demo Mode: Daily 9AM trigger simulated manually.</p>
+          </CardFooter>
         </Card>
       )}
     </div>
