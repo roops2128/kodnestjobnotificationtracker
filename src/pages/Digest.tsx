@@ -172,18 +172,24 @@ const Digest = () => {
 
   return (
     <div className="flex-1 p-4 md:p-8 max-w-3xl mx-auto w-full bg-muted/20 rounded-lg">
-      {!prefs && (
-        <p className="text-xs text-muted-foreground text-center mb-4">
-          Preferences not set — showing latest jobs now and upgrading matching once preferences are saved.
-        </p>
+      {!prefs && !digest && (
+        <div className="text-center py-12">
+          <p className="text-muted-foreground font-medium">Set preferences to generate a personalized digest.</p>
+        </div>
       )}
 
-      {!digest && (
+      {prefs && !digest && (
         <div className="text-center mb-6">
           <Button size="lg" onClick={generate} className="gap-2">
             <Sparkles className="h-4 w-4" /> Generate Today&apos;s 9AM Digest (Simulated)
           </Button>
           <p className="text-xs text-muted-foreground mt-2">Demo Mode: Daily 9AM trigger simulated manually.</p>
+        </div>
+      )}
+
+      {digest && noMatches && (
+        <div className="text-center py-12">
+          <p className="text-muted-foreground font-medium">No matching roles today. Check again tomorrow.</p>
         </div>
       )}
 
