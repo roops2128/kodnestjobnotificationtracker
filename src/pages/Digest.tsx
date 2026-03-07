@@ -117,7 +117,7 @@ const buildDigest = (sourceJobs: Job[], prefs: ReturnType<typeof loadPreferences
 const Digest = () => {
   const prefs = useMemo(() => loadPreferences(), []);
   const [digest, setDigest] = useState<DigestEntry[] | null>(() => loadDigest());
-  const [noMatches, setNoMatches] = useState(false);
+  const noMatches = digest !== null && digest.length === 0;
   const [savedIds, setSavedIds] = useState<number[]>(() => getSaved());
 
   const generate = useCallback(() => {
