@@ -71,31 +71,39 @@ const loadDigest = (): DigestEntry[] | null => {
   }
 };
 
+const buildDigestStrict = (sourceJobs: Job[], prefs: Preferences): DigestEntry[] => {
+  const scored = sourceJobs.map(job => ({
+    job,
+    score: computeMatchScore(job, prefs),
+  }));
+
+  const matches = scored
+    .filter(({ score }) => score >= prefs.minMatchScore)
+    .sort((a, b) => b.score - a.score || a.job.postedDaysAgo - b.job.postedDaysAgo)
+    .slice(0, 10);
+
+  return matches.map(({ job, score }) => ({
+    id: job.id,
+    title: job.title,
+    company: job.company,
+    location: job.location,
+    experience: job.experience,
+    matchScore: score,
+    applyUrl: job.applyUrl,
+  }));
+};
+
 const buildDigest = (sourceJobs: Job[], prefs: ReturnType<typeof loadPreferences>) => {
   const scored = sourceJobs.map(job => ({
     job,
     score: prefs ? computeMatchScore(job, prefs) : 0,
   }));
 
-  const matches = prefs
-    ? scored
-        .filter(({ score }) => score >= prefs.minMatchScore)
-        .sort((a, b) => b.score - a.score || a.job.postedDaysAgo - b.job.postedDaysAgo)
-    : [];
+  const selected = [...scored]
+    .sort((a, b) => a.job.postedDaysAgo - b.job.postedDaysAgo)
+    .slice(0, 10);
 
-  const selected = [...matches];
-  const pickedIds = new Set(selected.map(({ job }) => job.id));
-  const recents = [...scored].sort((a, b) => a.job.postedDaysAgo - b.job.postedDaysAgo);
-
-  for (const item of recents) {
-    if (selected.length >= 10) break;
-    if (!pickedIds.has(item.job.id)) {
-      selected.push(item);
-      pickedIds.add(item.job.id);
-    }
-  }
-
-  return selected.slice(0, 10).map(({ job, score }) => ({
+  return selected.map(({ job, score }) => ({
     id: job.id,
     title: job.title,
     company: job.company,
