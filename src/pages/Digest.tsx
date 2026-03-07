@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { jobs, type Job } from "@/data/jobs";
-import { loadPreferences, computeMatchScore, scoreBadgeVariant } from "@/lib/preferences";
+import { loadPreferences, computeMatchScore, scoreBadgeVariant, type Preferences } from "@/lib/preferences";
 import { toast } from "@/hooks/use-toast";
 import { ExternalLink, Sparkles, Copy, Mail, MapPin, Bookmark, BookmarkCheck } from "lucide-react";
 
