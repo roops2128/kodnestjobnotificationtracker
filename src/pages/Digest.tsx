@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { jobs, type Job } from "@/data/jobs";
-import { loadPreferences, computeMatchScore, scoreBadgeVariant } from "@/lib/preferences";
+import { loadPreferences, computeMatchScore, scoreBadgeVariant, type Preferences } from "@/lib/preferences";
 import { toast } from "@/hooks/use-toast";
 import { ExternalLink, Sparkles, Copy, Mail, MapPin, Bookmark, BookmarkCheck } from "lucide-react";
 
@@ -71,31 +71,39 @@ const loadDigest = (): DigestEntry[] | null => {
   }
 };
 
+const buildDigestStrict = (sourceJobs: Job[], prefs: Preferences): DigestEntry[] => {
+  const scored = sourceJobs.map(job => ({
+    job,
+    score: computeMatchScore(job, prefs),
+  }));
+
+  const matches = scored
+    .filter(({ score }) => score >= prefs.minMatchScore)
+    .sort((a, b) => b.score - a.score || a.job.postedDaysAgo - b.job.postedDaysAgo)
+    .slice(0, 10);
+
+  return matches.map(({ job, score }) => ({
+    id: job.id,
+    title: job.title,
+    company: job.company,
+    location: job.location,
+    experience: job.experience,
+    matchScore: score,
+    applyUrl: job.applyUrl,
+  }));
+};
+
 const buildDigest = (sourceJobs: Job[], prefs: ReturnType<typeof loadPreferences>) => {
   const scored = sourceJobs.map(job => ({
     job,
     score: prefs ? computeMatchScore(job, prefs) : 0,
   }));
 
-  const matches = prefs
-    ? scored
-        .filter(({ score }) => score >= prefs.minMatchScore)
-        .sort((a, b) => b.score - a.score || a.job.postedDaysAgo - b.job.postedDaysAgo)
-    : [];
+  const selected = [...scored]
+    .sort((a, b) => a.job.postedDaysAgo - b.job.postedDaysAgo)
+    .slice(0, 10);
 
-  const selected = [...matches];
-  const pickedIds = new Set(selected.map(({ job }) => job.id));
-  const recents = [...scored].sort((a, b) => a.job.postedDaysAgo - b.job.postedDaysAgo);
-
-  for (const item of recents) {
-    if (selected.length >= 10) break;
-    if (!pickedIds.has(item.job.id)) {
-      selected.push(item);
-      pickedIds.add(item.job.id);
-    }
-  }
-
-  return selected.slice(0, 10).map(({ job, score }) => ({
+  return selected.map(({ job, score }) => ({
     id: job.id,
     title: job.title,
     company: job.company,
@@ -109,22 +117,25 @@ const buildDigest = (sourceJobs: Job[], prefs: ReturnType<typeof loadPreferences
 const Digest = () => {
   const prefs = useMemo(() => loadPreferences(), []);
   const [digest, setDigest] = useState<DigestEntry[] | null>(() => loadDigest());
+  const [noMatches, setNoMatches] = useState(false);
   const [savedIds, setSavedIds] = useState<number[]>(() => getSaved());
 
   const generate = useCallback(() => {
     const existing = loadDigest();
     if (existing) {
       setDigest(existing);
+      setNoMatches(existing.length === 0);
       toast({ description: "Loaded today's existing digest." });
       return;
     }
 
     const pool = jobs.length > 0 ? jobs : createMockJobs();
-    const nextDigest = buildDigest(pool, prefs);
+    const nextDigest = prefs ? buildDigestStrict(pool, prefs) : buildDigest(pool, prefs);
 
     localStorage.setItem(todayKey(), JSON.stringify(nextDigest));
     setDigest(nextDigest);
-    toast({ description: "Digest generated for today." });
+    setNoMatches(nextDigest.length === 0);
+    toast({ description: nextDigest.length > 0 ? "Digest generated for today." : "No matching roles found." });
   }, [prefs]);
 
   const digestText = useMemo(() => {
@@ -161,13 +172,13 @@ const Digest = () => {
 
   return (
     <div className="flex-1 p-4 md:p-8 max-w-3xl mx-auto w-full bg-muted/20 rounded-lg">
-      {!prefs && (
-        <p className="text-xs text-muted-foreground text-center mb-4">
-          Preferences not set — showing latest jobs now and upgrading matching once preferences are saved.
-        </p>
+      {!prefs && !digest && (
+        <div className="text-center py-12">
+          <p className="text-muted-foreground font-medium">Set preferences to generate a personalized digest.</p>
+        </div>
       )}
 
-      {!digest && (
+      {prefs && !digest && (
         <div className="text-center mb-6">
           <Button size="lg" onClick={generate} className="gap-2">
             <Sparkles className="h-4 w-4" /> Generate Today&apos;s 9AM Digest (Simulated)
@@ -176,7 +187,13 @@ const Digest = () => {
         </div>
       )}
 
-      {digest && (
+      {digest && noMatches && (
+        <div className="text-center py-12">
+          <p className="text-muted-foreground font-medium">No matching roles today. Check again tomorrow.</p>
+        </div>
+      )}
+
+      {digest && digest.length > 0 && (
         <Card className="bg-card shadow-lg">
           <CardHeader className="text-center border-b pb-4">
             <CardTitle className="text-xl md:text-2xl">Top 10 Jobs For You — 9AM Digest</CardTitle>
