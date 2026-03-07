@@ -109,22 +109,25 @@ const buildDigest = (sourceJobs: Job[], prefs: ReturnType<typeof loadPreferences
 const Digest = () => {
   const prefs = useMemo(() => loadPreferences(), []);
   const [digest, setDigest] = useState<DigestEntry[] | null>(() => loadDigest());
+  const [noMatches, setNoMatches] = useState(false);
   const [savedIds, setSavedIds] = useState<number[]>(() => getSaved());
 
   const generate = useCallback(() => {
     const existing = loadDigest();
     if (existing) {
       setDigest(existing);
+      setNoMatches(existing.length === 0);
       toast({ description: "Loaded today's existing digest." });
       return;
     }
 
     const pool = jobs.length > 0 ? jobs : createMockJobs();
-    const nextDigest = buildDigest(pool, prefs);
+    const nextDigest = prefs ? buildDigestStrict(pool, prefs) : buildDigest(pool, prefs);
 
     localStorage.setItem(todayKey(), JSON.stringify(nextDigest));
     setDigest(nextDigest);
-    toast({ description: "Digest generated for today." });
+    setNoMatches(nextDigest.length === 0);
+    toast({ description: nextDigest.length > 0 ? "Digest generated for today." : "No matching roles found." });
   }, [prefs]);
 
   const digestText = useMemo(() => {
