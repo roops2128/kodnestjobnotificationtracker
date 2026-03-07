@@ -193,7 +193,7 @@ const Digest = () => {
         </div>
       )}
 
-      {digest && (
+      {digest && digest.length > 0 && (
         <Card className="bg-card shadow-lg">
           <CardHeader className="text-center border-b pb-4">
             <CardTitle className="text-xl md:text-2xl">Top 10 Jobs For You — 9AM Digest</CardTitle>
