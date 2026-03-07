@@ -50,6 +50,10 @@
     --warning: 38 60% 52%;
     --warning-foreground: 0 0% 7%;
 
+    /* ── Info (blue for Applied status) ── */
+    --info: 210 70% 50%;
+    --info-foreground: 0 0% 98%;
+
     /* ── Borders & Inputs ── */
     --border: 40 12% 84%;
     --input: 40 12% 84%;
@@ -90,6 +94,8 @@
     --success-foreground: 0 0% 98%;
     --warning: 38 60% 52%;
     --warning-foreground: 0 0% 7%;
+    --info: 210 60% 45%;
+    --info-foreground: 0 0% 98%;
     --border: 0 0% 18%;
     --input: 0 0% 18%;
     --ring: 0 80% 55%;

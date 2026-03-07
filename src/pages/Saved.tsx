@@ -8,6 +8,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
 import { toast } from "@/hooks/use-toast";
+import { type JobStatus, getJobStatus, setJobStatus, addStatusUpdate, statusBadgeVariant } from "@/lib/job-status";
+import JobStatusButton from "@/components/JobStatusButton";
 
 const SAVED_KEY = "jnt_saved_jobs";
 const getSaved = (): number[] => {
@@ -27,6 +29,11 @@ const postedLabel = (d: number) => d === 0 ? "Today" : d === 1 ? "1 day ago" : `
 const Saved = () => {
   const [savedIds, setSavedIds] = useState<number[]>(getSaved);
   const [viewJob, setViewJob] = useState<Job | null>(null);
+  const [statusMap, setStatusMap] = useState<Record<number, JobStatus>>(() => {
+    const m: Record<number, JobStatus> = {};
+    getSaved().forEach(id => { m[id] = getJobStatus(id); });
+    return m;
+  });
 
   const savedJobs = useMemo(() => jobs.filter(j => savedIds.includes(j.id)), [savedIds]);
 
@@ -35,6 +42,15 @@ const Saved = () => {
     localStorage.setItem(SAVED_KEY, JSON.stringify(next));
     setSavedIds(next);
     toast({ description: "Job removed from saved" });
+  };
+
+  const handleStatusChange = (job: Job, status: JobStatus) => {
+    setJobStatus(job.id, status);
+    setStatusMap(prev => ({ ...prev, [job.id]: status }));
+    if (status !== "Not Applied") {
+      addStatusUpdate({ jobId: job.id, title: job.title, company: job.company, status, date: new Date().toISOString() });
+    }
+    toast({ description: `Status updated: ${status}` });
   };
 
   if (savedJobs.length === 0) {
@@ -57,38 +73,42 @@ const Saved = () => {
       <p className="text-muted-foreground text-sm mb-5">{savedJobs.length} saved</p>
 
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-        {savedJobs.map(job => (
-          <Card key={job.id} className="flex flex-col justify-between hover:shadow-md transition-shadow">
-            <CardContent className="pt-3 pb-2 flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <Badge variant={sourceBadgeVariant(job.source)}>{job.source}</Badge>
-                <span className="text-muted-foreground text-xs flex items-center gap-1">
-                  <Clock className="h-3 w-3" />{postedLabel(job.postedDaysAgo)}
-                </span>
-              </div>
-              <h3 className="font-serif text-base font-semibold leading-tight">{job.title}</h3>
-              <p className="text-sm text-foreground/80">{job.company}</p>
-              <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{job.location} · {job.mode}</span>
-                <span className="flex items-center gap-1"><Briefcase className="h-3 w-3" />{job.experience}</span>
-              </div>
-              <p className="text-sm font-medium text-foreground">{job.salaryRange}</p>
-              <div className="flex gap-1.5 pt-1">
-                <Button variant="secondary" size="sm" onClick={() => setViewJob(job)}>
-                  <Eye className="h-3.5 w-3.5 mr-1" /> View
-                </Button>
-                <Button variant="destructive" size="sm" onClick={() => handleRemove(job.id)}>
-                  <BookmarkX className="h-3.5 w-3.5 mr-1" /> Remove
-                </Button>
-                <Button variant="ghost" size="sm" asChild>
-                  <a href={job.applyUrl} target="_blank" rel="noopener noreferrer">
-                    <ExternalLink className="h-3.5 w-3.5 mr-1" /> Apply
-                  </a>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+        {savedJobs.map(job => {
+          const jobStatus = statusMap[job.id] || "Not Applied";
+          return (
+            <Card key={job.id} className="flex flex-col justify-between hover:shadow-md transition-shadow">
+              <CardContent className="pt-3 pb-2 flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <Badge variant={sourceBadgeVariant(job.source)}>{job.source}</Badge>
+                  <span className="text-muted-foreground text-xs flex items-center gap-1">
+                    <Clock className="h-3 w-3" />{postedLabel(job.postedDaysAgo)}
+                  </span>
+                </div>
+                <h3 className="font-serif text-base font-semibold leading-tight">{job.title}</h3>
+                <p className="text-sm text-foreground/80">{job.company}</p>
+                <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{job.location} · {job.mode}</span>
+                  <span className="flex items-center gap-1"><Briefcase className="h-3 w-3" />{job.experience}</span>
+                </div>
+                <p className="text-sm font-medium text-foreground">{job.salaryRange}</p>
+                <div className="flex items-center gap-1.5 pt-1 flex-wrap">
+                  <JobStatusButton status={jobStatus} onChangeStatus={(s) => handleStatusChange(job, s)} />
+                  <Button variant="secondary" size="sm" onClick={() => setViewJob(job)}>
+                    <Eye className="h-3.5 w-3.5 mr-1" /> View
+                  </Button>
+                  <Button variant="destructive" size="sm" onClick={() => handleRemove(job.id)}>
+                    <BookmarkX className="h-3.5 w-3.5 mr-1" /> Remove
+                  </Button>
+                  <Button variant="ghost" size="sm" asChild>
+                    <a href={job.applyUrl} target="_blank" rel="noopener noreferrer">
+                      <ExternalLink className="h-3.5 w-3.5 mr-1" /> Apply
+                    </a>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
       <Dialog open={!!viewJob} onOpenChange={open => !open && setViewJob(null)}>
@@ -100,6 +120,13 @@ const Saved = () => {
                 <DialogDescription>{viewJob.company} · {viewJob.location} · {viewJob.mode}</DialogDescription>
               </DialogHeader>
               <div className="space-y-3 text-sm">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">Status:</span>
+                  <JobStatusButton
+                    status={statusMap[viewJob.id] || "Not Applied"}
+                    onChangeStatus={(s) => handleStatusChange(viewJob, s)}
+                  />
+                </div>
                 <div><span className="font-medium">Experience:</span> {viewJob.experience}</div>
                 <div><span className="font-medium">Salary:</span> {viewJob.salaryRange}</div>
                 <div>

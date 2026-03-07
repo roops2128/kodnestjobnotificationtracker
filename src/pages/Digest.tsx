@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { jobs, type Job } from "@/data/jobs";
 import { loadPreferences, computeMatchScore, scoreBadgeVariant, type Preferences } from "@/lib/preferences";
 import { toast } from "@/hooks/use-toast";
-import { ExternalLink, Sparkles, Copy, Mail, MapPin, Bookmark, BookmarkCheck } from "lucide-react";
+import { ExternalLink, Sparkles, Copy, Mail, MapPin, Bookmark, BookmarkCheck, Activity } from "lucide-react";
+import { getStatusUpdates, statusBadgeVariant, type StatusUpdate } from "@/lib/job-status";
 
 const DIGEST_PREFIX = "jobTrackerDigest_";
 const SAVED_KEY = "jnt_saved_jobs";
@@ -56,8 +57,7 @@ const createMockJobs = (): Job[] =>
     postedDaysAgo: index % 5,
     salaryRange: "3–5 LPA",
     applyUrl: `https://jobs.example.com/apply/${9000 + index}`,
-    description:
-      "Join a product-focused engineering team and ship real features from day one.\n\nWork closely with mentors on frontend and backend modules.\n\nStrong fundamentals in JavaScript and problem solving are preferred.",
+    description: "Join a product-focused engineering team and ship real features from day one.",
   }));
 
 const loadDigest = (): DigestEntry[] | null => {
@@ -72,46 +72,31 @@ const loadDigest = (): DigestEntry[] | null => {
 };
 
 const buildDigestStrict = (sourceJobs: Job[], prefs: Preferences): DigestEntry[] => {
-  const scored = sourceJobs.map(job => ({
-    job,
-    score: computeMatchScore(job, prefs),
-  }));
-
-  const matches = scored
+  const scored = sourceJobs.map(job => ({ job, score: computeMatchScore(job, prefs) }));
+  return scored
     .filter(({ score }) => score >= prefs.minMatchScore)
     .sort((a, b) => b.score - a.score || a.job.postedDaysAgo - b.job.postedDaysAgo)
-    .slice(0, 10);
-
-  return matches.map(({ job, score }) => ({
-    id: job.id,
-    title: job.title,
-    company: job.company,
-    location: job.location,
-    experience: job.experience,
-    matchScore: score,
-    applyUrl: job.applyUrl,
-  }));
+    .slice(0, 10)
+    .map(({ job, score }) => ({
+      id: job.id, title: job.title, company: job.company,
+      location: job.location, experience: job.experience, matchScore: score, applyUrl: job.applyUrl,
+    }));
 };
 
 const buildDigest = (sourceJobs: Job[], prefs: ReturnType<typeof loadPreferences>) => {
-  const scored = sourceJobs.map(job => ({
-    job,
-    score: prefs ? computeMatchScore(job, prefs) : 0,
-  }));
-
-  const selected = [...scored]
+  const scored = sourceJobs.map(job => ({ job, score: prefs ? computeMatchScore(job, prefs) : 0 }));
+  return [...scored]
     .sort((a, b) => a.job.postedDaysAgo - b.job.postedDaysAgo)
-    .slice(0, 10);
+    .slice(0, 10)
+    .map(({ job, score }) => ({
+      id: job.id, title: job.title, company: job.company,
+      location: job.location, experience: job.experience, matchScore: score, applyUrl: job.applyUrl,
+    }));
+};
 
-  return selected.map(({ job, score }) => ({
-    id: job.id,
-    title: job.title,
-    company: job.company,
-    location: job.location,
-    experience: job.experience,
-    matchScore: score,
-    applyUrl: job.applyUrl,
-  }));
+const formatUpdateDate = (iso: string) => {
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 };
 
 const Digest = () => {
@@ -119,6 +104,7 @@ const Digest = () => {
   const [digest, setDigest] = useState<DigestEntry[] | null>(() => loadDigest());
   const noMatches = digest !== null && digest.length === 0;
   const [savedIds, setSavedIds] = useState<number[]>(() => getSaved());
+  const statusUpdates = useMemo<StatusUpdate[]>(() => getStatusUpdates(), []);
 
   const generate = useCallback(() => {
     const existing = loadDigest();
@@ -127,10 +113,8 @@ const Digest = () => {
       toast({ description: "Loaded today's existing digest." });
       return;
     }
-
     const pool = jobs.length > 0 ? jobs : createMockJobs();
     const nextDigest = prefs ? buildDigestStrict(pool, prefs) : buildDigest(pool, prefs);
-
     localStorage.setItem(todayKey(), JSON.stringify(nextDigest));
     setDigest(nextDigest);
     toast({ description: nextDigest.length > 0 ? "Digest generated for today." : "No matching roles found." });
@@ -139,15 +123,11 @@ const Digest = () => {
   const digestText = useMemo(() => {
     if (!digest || digest.length === 0) return "";
     return [
-      "Top 10 Jobs For You — 9AM Digest",
-      formatDate(),
-      "",
-      ...digest.map(
-        (d, i) =>
-          `${i + 1}. ${d.title} at ${d.company}\n   ${d.location} · ${d.experience}${prefs ? ` · ${d.matchScore}% match` : ""}\n   Apply: ${d.applyUrl}`,
+      "Top 10 Jobs For You — 9AM Digest", formatDate(), "",
+      ...digest.map((d, i) =>
+        `${i + 1}. ${d.title} at ${d.company}\n   ${d.location} · ${d.experience}${prefs ? ` · ${d.matchScore}% match` : ""}\n   Apply: ${d.applyUrl}`
       ),
-      "",
-      "Generated based on your preferences and latest job feed.",
+      "", "Generated based on your preferences and latest job feed.",
     ].join("\n");
   }, [digest, prefs]);
 
@@ -212,7 +192,6 @@ const Digest = () => {
                       <MapPin className="h-3 w-3" /> {d.location}
                     </p>
                   </div>
-
                   <div className="flex items-center gap-2 shrink-0">
                     {prefs && <Badge variant={scoreBadgeVariant(d.matchScore)}>{d.matchScore}%</Badge>}
                     <Button variant="ghost" size="sm" asChild>
@@ -244,6 +223,36 @@ const Digest = () => {
           </CardFooter>
         </Card>
       )}
+
+      {/* ── Recent Status Updates ── */}
+      <Card className="mt-5 bg-card">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Activity className="h-4 w-4 text-muted-foreground" />
+            Recent Status Updates
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {statusUpdates.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No status updates yet. Change a job's status from the Dashboard or Saved page.</p>
+          ) : (
+            <div className="space-y-2">
+              {statusUpdates.slice(0, 15).map((u, i) => (
+                <div key={`${u.jobId}-${i}`} className="flex items-center justify-between gap-3 border-b last:border-0 pb-2 last:pb-0">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{u.title}</p>
+                    <p className="text-xs text-muted-foreground">{u.company}</p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Badge variant={statusBadgeVariant(u.status)}>{u.status}</Badge>
+                    <span className="text-xs text-muted-foreground">{formatUpdateDate(u.date)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 };

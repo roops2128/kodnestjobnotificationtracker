@@ -16,6 +16,8 @@ import { loadPreferences, computeMatchScore, scoreBadgeVariant, type Preferences
 import { Bookmark, BookmarkCheck, ExternalLink, Eye, Search, MapPin, Briefcase, Clock, AlertCircle } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { Link } from "react-router-dom";
+import { type JobStatus, allStatuses, getJobStatus, setJobStatus, addStatusUpdate, statusBadgeVariant } from "@/lib/job-status";
+import JobStatusButton from "@/components/JobStatusButton";
 
 /* ── localStorage helpers ── */
 const SAVED_KEY = "jnt_saved_jobs";
@@ -51,13 +53,18 @@ const Dashboard = () => {
   const [experience, setExperience] = useState("all");
   const [source, setSource] = useState("all");
   const [sort, setSort] = useState("latest");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [savedIds, setSavedIds] = useState<number[]>(getSaved);
   const [viewJob, setViewJob] = useState<Job | null>(null);
   const [matchOnly, setMatchOnly] = useState(false);
+  const [statusMap, setStatusMap] = useState<Record<number, JobStatus>>(() => {
+    const m: Record<number, JobStatus> = {};
+    jobs.forEach(j => { m[j.id] = getJobStatus(j.id); });
+    return m;
+  });
 
   const prefs = useMemo<Preferences | null>(() => loadPreferences(), []);
 
-  // Pre-compute scores once
   const scoredJobs = useMemo(() => {
     return jobs.map(job => ({
       job,
@@ -68,7 +75,6 @@ const Dashboard = () => {
   const filtered = useMemo(() => {
     let list = [...scoredJobs];
 
-    // keyword filter
     if (keyword) {
       const kw = keyword.toLowerCase();
       list = list.filter(({ job: j }) => j.title.toLowerCase().includes(kw) || j.company.toLowerCase().includes(kw));
@@ -77,25 +83,33 @@ const Dashboard = () => {
     if (mode !== "all") list = list.filter(({ job: j }) => j.mode === mode);
     if (experience !== "all") list = list.filter(({ job: j }) => j.experience === experience);
     if (source !== "all") list = list.filter(({ job: j }) => j.source === source);
+    if (statusFilter !== "all") list = list.filter(({ job: j }) => (statusMap[j.id] || "Not Applied") === statusFilter);
 
-    // threshold filter
     if (matchOnly && prefs) {
       list = list.filter(({ matchScore }) => matchScore >= prefs.minMatchScore);
     }
 
-    // sorting
     if (sort === "latest") list.sort((a, b) => a.job.postedDaysAgo - b.job.postedDaysAgo);
     else if (sort === "oldest") list.sort((a, b) => b.job.postedDaysAgo - a.job.postedDaysAgo);
     else if (sort === "match") list.sort((a, b) => b.matchScore - a.matchScore);
     else if (sort === "salary") list.sort((a, b) => extractSalaryNum(b.job.salaryRange) - extractSalaryNum(a.job.salaryRange));
 
     return list;
-  }, [keyword, location, mode, experience, source, sort, scoredJobs, matchOnly, prefs]);
+  }, [keyword, location, mode, experience, source, sort, scoredJobs, matchOnly, prefs, statusFilter, statusMap]);
 
   const handleSave = useCallback((id: number) => {
     const next = toggleSave(id);
     setSavedIds(next);
     toast({ description: next.includes(id) ? "Job saved" : "Job removed from saved" });
+  }, []);
+
+  const handleStatusChange = useCallback((job: Job, status: JobStatus) => {
+    setJobStatus(job.id, status);
+    setStatusMap(prev => ({ ...prev, [job.id]: status }));
+    if (status !== "Not Applied") {
+      addStatusUpdate({ jobId: job.id, title: job.title, company: job.company, status, date: new Date().toISOString() });
+    }
+    toast({ description: `Status updated: ${status}` });
   }, []);
 
   const getScoreForModal = (job: Job) =>
@@ -108,7 +122,6 @@ const Dashboard = () => {
         {filtered.length} job{filtered.length !== 1 ? "s" : ""} found
       </p>
 
-      {/* ── Preferences Banner ── */}
       {!prefs && (
         <div className="flex items-center gap-2 border border-dashed rounded-md p-3 mb-4 bg-muted/40">
           <AlertCircle className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -120,7 +133,7 @@ const Dashboard = () => {
       )}
 
       {/* ── Filter Bar ── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2 mb-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2 mb-4">
         <div className="col-span-2 md:col-span-4 lg:col-span-2 relative">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input placeholder="Search title or company…" value={keyword} onChange={e => setKeyword(e.target.value)} className="pl-8" />
@@ -153,6 +166,13 @@ const Dashboard = () => {
             {uniqueSources.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
           </SelectContent>
         </Select>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger><SelectValue placeholder="Status" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Statuses</SelectItem>
+            {allStatuses.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <Select value={sort} onValueChange={setSort}>
           <SelectTrigger><SelectValue placeholder="Sort" /></SelectTrigger>
           <SelectContent>
@@ -164,7 +184,6 @@ const Dashboard = () => {
         </Select>
       </div>
 
-      {/* ── Match Toggle ── */}
       {prefs && (
         <div className="flex items-center gap-2 mb-5">
           <Switch checked={matchOnly} onCheckedChange={setMatchOnly} id="match-toggle" />
@@ -174,7 +193,6 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* ── Job Cards ── */}
       {filtered.length === 0 ? (
         <div className="text-center border border-dashed rounded-md p-8">
           <p className="text-muted-foreground">No roles match your criteria. Adjust filters or lower threshold.</p>
@@ -183,6 +201,7 @@ const Dashboard = () => {
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
           {filtered.map(({ job, matchScore }) => {
             const isSaved = savedIds.includes(job.id);
+            const jobStatus = statusMap[job.id] || "Not Applied";
             return (
               <Card key={job.id} className="flex flex-col justify-between hover:shadow-md transition-shadow">
                 <CardContent className="pt-3 pb-2 flex flex-col gap-2">
@@ -204,7 +223,8 @@ const Dashboard = () => {
                     <span className="flex items-center gap-1"><Briefcase className="h-3 w-3" />{job.experience}</span>
                   </div>
                   <p className="text-sm font-medium text-foreground">{job.salaryRange}</p>
-                  <div className="flex gap-1.5 pt-1">
+                  <div className="flex items-center gap-1.5 pt-1 flex-wrap">
+                    <JobStatusButton status={jobStatus} onChangeStatus={(s) => handleStatusChange(job, s)} />
                     <Button variant="secondary" size="sm" onClick={() => setViewJob(job)}>
                       <Eye className="h-3.5 w-3.5 mr-1" /> View
                     </Button>
@@ -225,7 +245,6 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* ── View Modal ── */}
       <Dialog open={!!viewJob} onOpenChange={open => !open && setViewJob(null)}>
         <DialogContent className="max-w-lg">
           {viewJob && (
@@ -242,6 +261,13 @@ const Dashboard = () => {
                     </Badge>
                   </div>
                 )}
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">Status:</span>
+                  <JobStatusButton
+                    status={statusMap[viewJob.id] || "Not Applied"}
+                    onChangeStatus={(s) => handleStatusChange(viewJob, s)}
+                  />
+                </div>
                 <div><span className="font-medium">Experience:</span> {viewJob.experience}</div>
                 <div><span className="font-medium">Salary:</span> {viewJob.salaryRange}</div>
                 <div>
