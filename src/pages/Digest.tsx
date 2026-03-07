@@ -117,14 +117,13 @@ const buildDigest = (sourceJobs: Job[], prefs: ReturnType<typeof loadPreferences
 const Digest = () => {
   const prefs = useMemo(() => loadPreferences(), []);
   const [digest, setDigest] = useState<DigestEntry[] | null>(() => loadDigest());
-  const [noMatches, setNoMatches] = useState(false);
+  const noMatches = digest !== null && digest.length === 0;
   const [savedIds, setSavedIds] = useState<number[]>(() => getSaved());
 
   const generate = useCallback(() => {
     const existing = loadDigest();
     if (existing) {
       setDigest(existing);
-      setNoMatches(existing.length === 0);
       toast({ description: "Loaded today's existing digest." });
       return;
     }
@@ -134,7 +133,6 @@ const Digest = () => {
 
     localStorage.setItem(todayKey(), JSON.stringify(nextDigest));
     setDigest(nextDigest);
-    setNoMatches(nextDigest.length === 0);
     toast({ description: nextDigest.length > 0 ? "Digest generated for today." : "No matching roles found." });
   }, [prefs]);
 
